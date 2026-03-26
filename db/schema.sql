@@ -111,6 +111,87 @@ CREATE TABLE IF NOT EXISTS processing_log (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- ============================================================
+-- COMPONENT RELATIONSHIPS
+-- Links between plan components that form the accountability
+-- chain: EIS analysis justifies Plan direction, S&Gs constrain
+-- practices, monitoring tracks desired conditions.
+--
+-- Each row is a directed relationship: source → target.
+-- The relationship_type defines what the link means.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS component_relationships (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+
+    -- The two components being linked
+    source_component_id INTEGER NOT NULL REFERENCES plan_components(id) ON DELETE CASCADE,
+    target_component_id INTEGER NOT NULL REFERENCES plan_components(id) ON DELETE CASCADE,
+
+    -- What kind of relationship this is
+    relationship_type TEXT NOT NULL CHECK (relationship_type IN (
+        'references',          -- Explicit cross-reference ("see S&G 46")
+        'justifies',           -- EIS analysis → Plan component (why this direction exists)
+        'constrains',          -- Plan S&G → Plan practice/activity (what it limits)
+        'monitors',            -- Monitoring requirement → DFC/S&G (what it tracks)
+        'implements',          -- Plan component → EIS alternative (what it enacts)
+        'describes_baseline',  -- EIS affected environment → Plan DFC (current vs. target)
+        'supersedes',          -- Amendment/revision relationship (newer replaces older)
+        'depends_on',          -- Operational dependency (this requires that)
+        'related'              -- Thematic/topical connection (same resource area)
+    )),
+
+    -- Whether this crosses the EIS/Plan boundary
+    crosses_boundary INTEGER DEFAULT 0,  -- 1 if source and target are in different document sections
+
+    -- How this relationship was detected
+    detection_method TEXT DEFAULT 'manual' CHECK (detection_method IN (
+        'explicit_reference',  -- Detected from text pattern ("see S&G 46", "Chapter 4, Section F")
+        'resource_match',      -- Same resource area in both components
+        'section_proximity',   -- Components in parent/child or sibling sections
+        'ai_detected',         -- Claude API semantic analysis
+        'manual'               -- Human-entered during review
+    )),
+
+    -- Confidence and verification
+    confidence REAL,            -- 0.0-1.0, how confident the detection is
+    human_verified INTEGER DEFAULT 0,
+
+    -- Context
+    evidence_text TEXT,         -- The text snippet that establishes this relationship
+    notes TEXT,                 -- Human-readable explanation
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ============================================================
+-- SECTION RELATIONSHIPS
+-- Broader thematic connections between sections (e.g., EIS
+-- Chapter 4 Soils analysis relates to Plan S&G section on soils).
+-- Useful when the connection is at the topic level rather than
+-- between specific component statements.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS section_relationships (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+
+    source_section_id INTEGER NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
+    target_section_id INTEGER NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
+
+    relationship_type TEXT NOT NULL CHECK (relationship_type IN (
+        'references', 'justifies', 'constrains', 'monitors',
+        'implements', 'describes_baseline', 'related'
+    )),
+
+    crosses_boundary INTEGER DEFAULT 0,
+    detection_method TEXT DEFAULT 'manual',
+    confidence REAL,
+    human_verified INTEGER DEFAULT 0,
+    notes TEXT,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_sections_plan ON sections(plan_id);
 CREATE INDEX IF NOT EXISTS idx_sections_parent ON sections(parent_id);
 CREATE INDEX IF NOT EXISTS idx_sections_docsection ON sections(document_section);
@@ -122,3 +203,10 @@ CREATE INDEX IF NOT EXISTS idx_components_docsection ON plan_components(document
 CREATE INDEX IF NOT EXISTS idx_pages_plan ON pages(plan_id, page_number);
 CREATE INDEX IF NOT EXISTS idx_pages_docsection ON pages(document_section);
 CREATE INDEX IF NOT EXISTS idx_table_cells ON table_cells(table_id, row_index, col_index);
+CREATE INDEX IF NOT EXISTS idx_comp_rel_source ON component_relationships(source_component_id);
+CREATE INDEX IF NOT EXISTS idx_comp_rel_target ON component_relationships(target_component_id);
+CREATE INDEX IF NOT EXISTS idx_comp_rel_type ON component_relationships(relationship_type);
+CREATE INDEX IF NOT EXISTS idx_comp_rel_plan ON component_relationships(plan_id);
+CREATE INDEX IF NOT EXISTS idx_sec_rel_source ON section_relationships(source_section_id);
+CREATE INDEX IF NOT EXISTS idx_sec_rel_target ON section_relationships(target_section_id);
+CREATE INDEX IF NOT EXISTS idx_sec_rel_plan ON section_relationships(plan_id);

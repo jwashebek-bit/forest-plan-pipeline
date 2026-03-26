@@ -11,7 +11,7 @@ Processes a forest plan PDF through five stages:
 Updated: Detects EIS/Plan boundary and tags all content accordingly.
 
 USAGE:
-    py -3.12 pipeline\\main.py "plan.pdf" --forest "Tahoe National Forest"
+    py -3.12 pipeline\\main.py "plan.pdf" --forest "Forest Name"
     py -3.12 pipeline\\main.py "plan.pdf" --engine pymupdf --force-ocr
 """
 
@@ -34,6 +34,7 @@ from pipeline.classifier import (
     extract_resource_area,
     detect_plan_body_start,
 )
+from pipeline.crossref import detect_cross_references
 from db.database import (
     init_database,
     create_plan,
@@ -326,6 +327,21 @@ def run_pipeline(
                    f"Classified {component_count} components")
     
     # ============================================================
+    # STAGE 4b: Cross-Reference Detection
+    # ============================================================
+    print(f"\n{'~'*40}")
+    print("STAGE 4b: Detecting cross-references...")
+    print(f"{'~'*40}")
+    
+    log_processing(conn, plan_id, "crossref_detection", "started")
+    
+    crossref_stats = detect_cross_references(conn, plan_id)
+    
+    log_processing(conn, plan_id, "crossref_detection", "completed",
+                   f"Detected {crossref_stats['total']} relationships",
+                   json.dumps(crossref_stats))
+    
+    # ============================================================
     # STAGE 5: Table Extraction
     # ============================================================
     print(f"\n{'~'*40}")
@@ -373,6 +389,10 @@ def run_pipeline(
     print(f"\nComponents by document section:")
     for ds, count in sorted(summary.get("components_by_document_section", {}).items()):
         print(f"  {ds}: {count}")
+    print(f"\nCross-references detected:")
+    for key, count in sorted(crossref_stats.items()):
+        if count > 0:
+            print(f"  {key}: {count}")
     print(f"\nDatabase saved to: {db_path}")
     
     conn.close()

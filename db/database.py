@@ -189,3 +189,145 @@ def get_plan_summary(conn, plan_id):
         "percent_verified": round((row[1] or 0) / row[0] * 100, 1) if row[0] > 0 else 0
     }
     return summary
+
+
+# ============================================================
+# RELATIONSHIP HELPERS
+# ============================================================
+
+def insert_component_relationship(conn, plan_id, source_id, target_id,
+                                   relationship_type, crosses_boundary=False,
+                                   detection_method="manual", confidence=None,
+                                   evidence_text=None, notes=None):
+    """Insert a relationship between two components."""
+    cursor = conn.execute(
+        """INSERT INTO component_relationships
+           (plan_id, source_component_id, target_component_id, relationship_type,
+            crosses_boundary, detection_method, confidence, evidence_text, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (plan_id, source_id, target_id, relationship_type,
+         1 if crosses_boundary else 0, detection_method, confidence,
+         evidence_text, notes)
+    )
+    conn.commit()
+    return cursor.lastrowid
+
+
+def insert_section_relationship(conn, plan_id, source_id, target_id,
+                                 relationship_type, crosses_boundary=False,
+                                 detection_method="manual", confidence=None,
+                                 notes=None):
+    """Insert a relationship between two sections."""
+    cursor = conn.execute(
+        """INSERT INTO section_relationships
+           (plan_id, source_section_id, target_section_id, relationship_type,
+            crosses_boundary, detection_method, confidence, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (plan_id, source_id, target_id, relationship_type,
+         1 if crosses_boundary else 0, detection_method, confidence, notes)
+    )
+    conn.commit()
+    return cursor.lastrowid
+
+
+def get_component_relationships(conn, component_id, direction="both"):
+    """
+    Get all relationships for a component.
+    direction: 'outgoing' (this component is source), 'incoming' (this is target), or 'both'
+    """
+    results = []
+    if direction in ("outgoing", "both"):
+        cursor = conn.execute(
+            """SELECT cr.*, pc.component_text as target_text, pc.component_type as target_type,
+                      pc.document_section as target_doc_section, pc.source_page as target_page
+               FROM component_relationships cr
+               JOIN plan_components pc ON cr.target_component_id = pc.id
+               WHERE cr.source_component_id = ?""",
+            (component_id,)
+        )
+        columns = [desc[0] for desc in cursor.description]
+        results.extend([{**dict(zip(columns, row)), "direction": "outgoing"} for row in cursor])
+
+    if direction in ("incoming", "both"):
+        cursor = conn.execute(
+            """SELECT cr.*, pc.component_text as source_text, pc.component_type as source_type,
+                      pc.document_section as source_doc_section, pc.source_page as source_page
+               FROM component_relationships cr
+               JOIN plan_components pc ON cr.source_component_id = pc.id
+               WHERE cr.target_component_id = ?""",
+            (component_id,)
+        )
+        columns = [desc[0] for desc in cursor.description]
+        results.extend([{**dict(zip(columns, row)), "direction": "incoming"} for row in cursor])
+
+    return results
+
+
+def get_accountability_chain(conn, plan_id, resource_area):
+    """
+    The OBAM query: for a given resource area, show the full accountability chain.
+    Returns: EIS baseline → desired condition → S&Gs that constrain → monitoring that tracks.
+    Components are grouped by their role in the chain.
+    """
+    chain = {}
+
+    # Desired conditions / DFCs for this resource
+    cursor = conn.execute(
+        """SELECT * FROM plan_components
+           WHERE plan_id = ? AND resource_area = ?
+           AND component_type IN ('desired_condition', 'desired_future_condition')
+           AND document_section = 'plan'""",
+        (plan_id, resource_area)
+    )
+    columns = [desc[0] for desc in cursor.description]
+    chain["desired_conditions"] = [dict(zip(columns, row)) for row in cursor]
+
+    # S&Gs that constrain this resource
+    cursor = conn.execute(
+        """SELECT * FROM plan_components
+           WHERE plan_id = ? AND resource_area = ?
+           AND component_type IN ('standard_and_guideline', 'standard', 'guideline')
+           AND document_section = 'plan'""",
+        (plan_id, resource_area)
+    )
+    columns = [desc[0] for desc in cursor.description]
+    chain["standards_and_guidelines"] = [dict(zip(columns, row)) for row in cursor]
+
+    # Monitoring requirements for this resource
+    cursor = conn.execute(
+        """SELECT * FROM plan_components
+           WHERE plan_id = ? AND resource_area = ?
+           AND component_type = 'monitoring_requirement'
+           AND document_section = 'plan'""",
+        (plan_id, resource_area)
+    )
+    columns = [desc[0] for desc in cursor.description]
+    chain["monitoring"] = [dict(zip(columns, row)) for row in cursor]
+
+    # EIS analysis for this resource
+    cursor = conn.execute(
+        """SELECT * FROM plan_components
+           WHERE plan_id = ? AND resource_area = ?
+           AND component_type IN ('eis_narrative', 'eis_impact_analysis')
+           AND document_section = 'eis'""",
+        (plan_id, resource_area)
+    )
+    columns = [desc[0] for desc in cursor.description]
+    chain["eis_analysis"] = [dict(zip(columns, row)) for row in cursor]
+
+    # Cross-boundary relationships for this resource
+    cursor = conn.execute(
+        """SELECT cr.*, 
+                  src.component_text as source_text, src.component_type as source_type,
+                  tgt.component_text as target_text, tgt.component_type as target_type
+           FROM component_relationships cr
+           JOIN plan_components src ON cr.source_component_id = src.id
+           JOIN plan_components tgt ON cr.target_component_id = tgt.id
+           WHERE cr.plan_id = ? AND cr.crosses_boundary = 1
+           AND (src.resource_area = ? OR tgt.resource_area = ?)""",
+        (plan_id, resource_area, resource_area)
+    )
+    columns = [desc[0] for desc in cursor.description]
+    chain["cross_boundary_links"] = [dict(zip(columns, row)) for row in cursor]
+
+    return chain

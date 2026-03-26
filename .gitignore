@@ -25,3 +25,6 @@ desktop.ini
 
 # Exploration scripts (local debugging, not part of the tool)
 explore*.py
+
+*.pdf
+100
