@@ -1,0 +1,18 @@
+# Forest Plan Pipeline — Python Dependencies
+# Install with: pip install -r requirements.txt --break-system-packages
+
+# ── Core PDF handling ──
+PyMuPDF>=1.23.0          # PDF rendering and text extraction (import as 'fitz')
+
+# ── OCR engines (install the one you'll use) ──
+pytesseract>=0.3.10      # Python wrapper for Tesseract OCR
+Pillow>=10.0.0           # Image handling (required by pytesseract)
+# marker-pdf>=0.3.0      # ML-based PDF extraction (uncomment to use Marker engine)
+                          # Note: first run downloads ~3GB of models
+
+# ── Web framework (for the review app in Phase 2) ──
+fastapi>=0.100.0         # Modern async web framework
+uvicorn>=0.23.0          # ASGI server to run FastAPI
+
+# ── Utilities ──
+python-multipart>=0.0.6  # File upload handling for FastAPI
